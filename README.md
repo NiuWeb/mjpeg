@@ -1,3 +1,4 @@
+> I made this fork to remove dependences from os.File and use a in-memory buffer instead. I don't always to write to a file.
 # mjpeg
 
 [![Build Status](https://travis-ci.org/icza/mjpeg.svg?branch=master)](https://travis-ci.org/icza/mjpeg)

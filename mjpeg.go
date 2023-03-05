@@ -1,44 +1,46 @@
 /*
+Original code at:
+https://github.com/icza/mjpeg
 
 Package mjpeg contains an MJPEG video format writer.
 
-Examples
+# Examples
 
 Let's see an example how to turn the JPEG files 1.jpg, 2.jpg, ..., 10.jpg into a movie file:
 
-    checkErr := func(err error) {
-        if err != nil {
-            panic(err)
-        }
-    }
+	checkErr := func(err error) {
+	    if err != nil {
+	        panic(err)
+	    }
+	}
 
-    // Video size: 200x100 pixels, FPS: 2
-    aw, err := mjpeg.New("test.avi", 200, 100, 2)
-    checkErr(err)
+	// Video size: 200x100 pixels, FPS: 2
+	aw, err := mjpeg.New("test.avi", 200, 100, 2)
+	checkErr(err)
 
-    // Create a movie from images: 1.jpg, 2.jpg, ..., 10.jpg
-    for i := 1; i <= 10; i++ {
-        data, err := ioutil.ReadFile(fmt.Sprintf("%d.jpg", i))
-        checkErr(err)
-        checkErr(aw.AddFrame(data))
-    }
+	// Create a movie from images: 1.jpg, 2.jpg, ..., 10.jpg
+	for i := 1; i <= 10; i++ {
+	    data, err := ioutil.ReadFile(fmt.Sprintf("%d.jpg", i))
+	    checkErr(err)
+	    checkErr(aw.AddFrame(data))
+	}
 
-    checkErr(aw.Close())
+	checkErr(aw.Close())
 
 Example to add an image.Image as a frame to the video:
 
-    aw, err := mjpeg.New("test.avi", 200, 100, 2)
-    checkErr(err)
+	aw, err := mjpeg.New("test.avi", 200, 100, 2)
+	checkErr(err)
 
-    var img image.Image
-    // Acquire / initialize image, e.g.:
-    // img = image.NewRGBA(image.Rect(0, 0, 200, 100))
+	var img image.Image
+	// Acquire / initialize image, e.g.:
+	// img = image.NewRGBA(image.Rect(0, 0, 200, 100))
 
-    buf := &bytes.Buffer{}
-    checkErr(jpeg.Encode(buf, img, nil))
-    checkErr(aw.AddFrame(buf.Bytes()))
+	buf := &bytes.Buffer{}
+	checkErr(jpeg.Encode(buf, img, nil))
+	checkErr(aw.AddFrame(buf.Bytes()))
 
-    checkErr(aw.Close())
+	checkErr(aw.Close())
 */
 package mjpeg
 
@@ -46,18 +48,18 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"log"
-	"os"
 	"time"
+
+	"github.com/dsnet/golib/memfile"
 )
 
 var (
 	// ErrTooLarge reports if more frames cannot be added,
 	// else the video file would get corrupted.
-	ErrTooLarge = errors.New("Video file too large")
+	ErrTooLarge = errors.New("video file too large")
 
 	// errImproperUse signals improper state (due to a previous error).
-	errImproperState = errors.New("Improper State")
+	errImproperState = errors.New("improper State")
 )
 
 // AviWriter is an *.avi video writer.
@@ -68,12 +70,13 @@ type AviWriter interface {
 
 	// Close finalizes and closes the avi file.
 	Close() error
+
+	// reads all bytes from the avi file
+	ReadBytes() ([]byte, error)
 }
 
 // aviWriter is the AviWriter implementation.
 type aviWriter struct {
-	// aviFile is the name of the file to write the result to
-	aviFile string
 	// width is the width of the video
 	width int32
 	// height is the height of the video
@@ -82,11 +85,9 @@ type aviWriter struct {
 	fps int32
 
 	// avif is the avi file descriptor
-	avif *os.File
-	// idxFile is the name of the index file
-	idxFile string
+	avif io.ReadWriteSeeker
 	// idxf is the index file descriptor
-	idxf *os.File
+	idxf io.ReadWriteSeeker
 
 	// writeErr holds the last encountered write error (to avif)
 	err error
@@ -109,45 +110,18 @@ type aviWriter struct {
 
 // New returns a new AviWriter.
 // The Close() method of the AviWriter must be called to finalize the video file.
-func New(aviFile string, width, height, fps int32) (awr AviWriter, err error) {
+func New(width, height, fps int32) AviWriter {
 	aw := &aviWriter{
-		aviFile:      aviFile,
 		width:        width,
 		height:       height,
 		fps:          fps,
-		idxFile:      aviFile + ".idx_",
 		lengthFields: make([]int64, 0, 5),
 		buf4:         make([]byte, 4),
 		buf2:         make([]byte, 2),
 	}
 
-	defer func() {
-		if err == nil {
-			return
-		}
-		logErr := func(e error) {
-			if e != nil {
-				log.Printf("Error: %v\n", e)
-			}
-		}
-		if aw.avif != nil {
-			logErr(aw.avif.Close())
-			logErr(os.Remove(aviFile))
-		}
-		if aw.idxf != nil {
-			logErr(aw.idxf.Close())
-			logErr(os.Remove(aw.idxFile))
-		}
-	}()
-
-	aw.avif, err = os.Create(aviFile)
-	if err != nil {
-		return nil, err
-	}
-	aw.idxf, err = os.Create(aw.idxFile)
-	if err != nil {
-		return nil, err
-	}
+	aw.avif = memfile.New([]byte{})
+	aw.idxf = memfile.New([]byte{})
 
 	wstr, wint32, wint16, wLenF, finalizeLenF :=
 		aw.writeStr, aw.writeInt32, aw.writeInt16, aw.writeLengthField, aw.finalizeLengthField
@@ -235,19 +209,12 @@ func New(aviFile string, width, height, fps int32) (awr AviWriter, err error) {
 	aw.moviPos = aw.currentPos()
 	wstr("movi") // LIST chunk type: 'movi'
 
-	if aw.err != nil {
-		return nil, aw.err
-	}
-
-	return aw, nil
+	return aw
 }
 
 // writeStr writes a string to the file.
 func (aw *aviWriter) writeStr(s string) {
-	if aw.err != nil {
-		return
-	}
-	_, aw.err = aw.avif.WriteString(s)
+	io.WriteString(aw.avif, s)
 }
 
 // writeInt32 writes a 32-bit int value to the file.
@@ -359,12 +326,6 @@ func (aw *aviWriter) AddFrame(jpegData []byte) error {
 
 // Close implements AviWriter.Close().
 func (aw *aviWriter) Close() (err error) {
-	defer func() {
-		aw.avif.Close()
-		aw.idxf.Close()
-		os.Remove(aw.idxFile)
-	}()
-
 	aw.finalizeLengthField() // LIST 'movi' finished (nesting level 1)
 
 	// Write index
@@ -392,4 +353,10 @@ func (aw *aviWriter) Close() (err error) {
 	aw.finalizeLengthField() // 'RIFF' File finished (nesting level 0)
 
 	return aw.err
+}
+
+// read the entire file
+func (aw *aviWriter) ReadBytes() ([]byte, error) {
+	aw.avif.Seek(0, 0)
+	return io.ReadAll(aw.avif)
 }
