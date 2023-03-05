@@ -355,8 +355,9 @@ func (aw *aviWriter) Close() (err error) {
 	return aw.err
 }
 
-// read the entire file
+// closes and read the avi file
 func (aw *aviWriter) ReadBytes() ([]byte, error) {
+	aw.Close()
 	aw.avif.Seek(0, 0)
 	return io.ReadAll(aw.avif)
 }
