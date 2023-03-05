@@ -1,3 +1,4 @@
+> ### About this fork
 > I made this fork to remove dependences from os.File and use a in-memory buffer instead. I don't always to write to a file.
 # mjpeg
 
