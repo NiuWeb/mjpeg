@@ -108,9 +108,14 @@ type aviWriter struct {
 	buf4, buf2 []byte
 }
 
+// creates a new AviWriter with in-memory files
+func New(width, height, fps int32) AviWriter {
+	return NewWriter(memfile.New([]byte{}), memfile.New([]byte{}), width, height, fps)
+}
+
 // New returns a new AviWriter.
 // The Close() method of the AviWriter must be called to finalize the video file.
-func New(width, height, fps int32) AviWriter {
+func NewWriter(avif io.ReadWriteSeeker, idxf io.ReadWriteSeeker, width, height, fps int32) AviWriter {
 	aw := &aviWriter{
 		width:        width,
 		height:       height,
@@ -120,8 +125,8 @@ func New(width, height, fps int32) AviWriter {
 		buf2:         make([]byte, 2),
 	}
 
-	aw.avif = memfile.New([]byte{})
-	aw.idxf = memfile.New([]byte{})
+	aw.avif = avif
+	aw.idxf = idxf
 
 	wstr, wint32, wint16, wLenF, finalizeLenF :=
 		aw.writeStr, aw.writeInt32, aw.writeInt16, aw.writeLengthField, aw.finalizeLengthField
