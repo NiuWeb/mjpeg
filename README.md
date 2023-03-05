@@ -1,5 +1,20 @@
 > ### About this fork
 > I made this fork to remove dependences from os.File and use a in-memory buffer instead. I don't always want to write to a file.
+>
+```go
+package main
+import "github.com/NiuWeb/mjpeg"
+
+func main() {
+    writer := mjpeg.New(640, 480, 24)
+    buf := bytes.NewBuffer([]byte{})
+    var img image.Image
+    jpeg.Encode(buf, img, nil)
+    writer.AddFrame(buf.Bytes())
+    
+    data := writer.ReadBytes()
+}
+```
 # mjpeg
 
 [![Build Status](https://travis-ci.org/icza/mjpeg.svg?branch=master)](https://travis-ci.org/icza/mjpeg)
